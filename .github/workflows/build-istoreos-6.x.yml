@@ -3,8 +3,6 @@ name: Build iStore OS 6.x
 on:
   repository_dispatch:
   workflow_dispatch:
-  # schedule:
-   # - cron: 40 15 * * 3
   ssh:
    escription: '使用 ssh 连接到编译环境 (Connect to the build environment using ssh)'
    type: boolean
