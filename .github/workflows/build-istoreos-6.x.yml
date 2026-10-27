@@ -130,9 +130,6 @@ jobs:
       run: |
         if [ -e files ]; then mv files openwrt/files; fi
         if [ -e "$CONFIG_FILE_PATH" ]; then mv "$CONFIG_FILE_PATH" "openwrt/$CONFIG_FILE"; fi
-        # istoreos-25.12（内核 6.12）的 rockchip target 已不自带 files/arch/arm64/boot/dts/rockchip/
-        # 目录，而 02/03 脚本会向这里复制自定义设备树，提前创建避免 cp 目标不存在而失败
-        mkdir -p openwrt/target/linux/rockchip/files/arch/arm64/boot/dts/rockchip/
         chmod +x "$DIY_P2_SH"
         chmod +x "$DIY_P3_SH"
         cd openwrt
