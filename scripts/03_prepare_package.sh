@@ -52,7 +52,13 @@ function git_sparse_clone() {
 
 # 常见插件
 git_sparse_clone main https://github.com/gdy666/luci-app-lucky luci-app-lucky lucky
-cp -f $GITHUB_WORKSPACE/configfiles/lucky_status.htm package/new/luci-app-lucky/luasrc/view/lucky/lucky_status.htm
+# 新版 lucky 前端已改为 htdocs/luci-static/resources/view/lucky（JS），不再有 luasrc/view/lucky/
+# 路径：目标目录存在才覆盖 lucky_status.htm，否则跳过并警告，避免构建中断
+if [ -d package/new/luci-app-lucky/luasrc/view/lucky ]; then
+  cp -f $GITHUB_WORKSPACE/configfiles/lucky_status.htm package/new/luci-app-lucky/luasrc/view/lucky/lucky_status.htm
+else
+  echo "::warning::新版 luci-app-lucky 无 luasrc/view/lucky/ 目录，已跳过 lucky_status.htm 覆盖；如需自定义状态页，请适配新版 htdocs/luci-static/resources/view/lucky/ 结构"
+fi
 git_sparse_clone main https://github.com/sbwml/luci-app-openlist2 luci-app-openlist2 openlist2
 git_sparse_clone main https://github.com/sbwml/openwrt_pkgs luci-app-zerotier
 git_sparse_clone main https://github.com/Kwonelee/openwrt-packages luci-app-ramfree filebrowser luci-app-filebrowser-go
