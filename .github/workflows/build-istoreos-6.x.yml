@@ -144,10 +144,7 @@ jobs:
       uses: lhotari/action-upterm@v1
       with:
         limit-access-to-actor: true
-        limits: |
-          cpus=2
-          memory=4GB
-          time=20m
+        wait-timeout-minutes: 20
 
     - name: 下载软件包
       id: package
