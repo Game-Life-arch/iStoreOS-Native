@@ -42,3 +42,26 @@ cp -f $GITHUB_WORKSPACE/configfiles/uboot-rockchip/station-m2-rk3566_defconfig p
 
 # 复制dts到target/linux/rockchip/dts/rk3568
 cp -f $GITHUB_WORKSPACE/configfiles/dts/rk3568/rk3566-jp-tvbox.dts target/linux/rockchip/dts/rk3568/
+
+# ============================================================================================================
+# 移植BDY-G98 (RK3588, YT9215S 双网口)
+# ============================================================================================================
+# 增加设备
+# 注意：$(Device/rk3588) 宏调用必须用单引号包裹，防止被 bash 当作命令替换展开
+echo -e '\ndefine Device/bdy_bdy-g98
+  $(Device/rk3588)
+  DEVICE_VENDOR := BDY
+  DEVICE_MODEL := G98
+  DEVICE_DTS := rk3588-bdy-g98-fan
+  UBOOT_DEVICE_NAME := generic-rk3588
+endef
+TARGET_DEVICES += bdy_bdy-g98' >> target/linux/rockchip/image/armv8.mk
+
+# 复制dts到 target/linux/rockchip/dts/rk3588
+cp -f $GITHUB_WORKSPACE/configfiles/dts/rk3588/rk3588-bdy-g98-fan.dts target/linux/rockchip/dts/rk3588/
+
+# 添加dtb编译条目补丁到 target/linux/rockchip/patches-6.12
+cp -f $GITHUB_WORKSPACE/configfiles/patch/810-add-rk3588-bdy-g98-dtb-to-makefile.patch target/linux/rockchip/patches-6.12/
+
+# 将 bdy_bdy-g98 挂到 generic-rk3588 U-Boot 的 BUILD_DEVICES（仅限 generic-rk3588 定义块内，radxa_rock-5t 为最后一项不带尾斜杠）
+sed -i '/define U-Boot\/generic-rk3588/,/^endef$/s/    radxa_rock-5t$/    radxa_rock-5t \\\n    bdy_bdy-g98 \\/' package/boot/uboot-rockchip/Makefile
