@@ -9,6 +9,11 @@ on:
         required: false
         default: 'false'
 
+# 显式声明权限：发布/删除 Release 需要 contents: write
+# （不写此项时默认 GITHUB_TOKEN 权限取决于仓库设置，可能导致发布失败）
+permissions:
+  contents: write
+
 env:
   REPO_URL: https://github.com/istoreos/istoreos
   FEEDS_CONF: feeds.conf
@@ -19,7 +24,10 @@ env:
   UPLOAD_BIN_DIR: true
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
-  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+  # 注意：不要在这里用 GITHUB_TOKEN 覆盖 GitHub 自动注入的 token，
+  # 否则 secrets.GH_TOKEN 未配置时会把系统 token 覆盖成空串，
+  # 导致"发布 Release/删除旧 Release"两个步骤全部失败。
+  # GH_TOKEN（PAT）仅在"删除运行记录"步骤单独使用。
 
 jobs:
   build:
@@ -35,12 +43,16 @@ jobs:
 
       fail-fast: false
 
+    env:
+      # 供"删除运行记录"步骤判断 GH_TOKEN 是否已配置，避免空 token 报错
+      GH_TOKEN_PRESENT: ${{ secrets.GH_TOKEN != '' }}
+
     steps:
     - name: 合并磁盘
       uses: sbwml/actions@free-disk
 
-    - name: 准备完成
-      uses: actions/checkout@main
+    - name: 检出仓库
+      uses: actions/checkout@v4
 
     - name: 创建目录
       run: |
@@ -56,9 +68,9 @@ jobs:
         echo -e "\n\e[1;32mMemory:\e[0m"
         free -h
         echo -e "\n\e[1;32mStorage:\e[0m"
-        df -Th / /mnt
+        df -Th / /mnt || true
         echo -e "\n\e[1;32mSystem:\e[0m"
-        lsb_release -a
+        lsb_release -a 2>/dev/null || cat /etc/os-release
         echo -e "\n\e[1;32mKernel:\e[0m"
         uname -a
         echo
@@ -85,8 +97,8 @@ jobs:
       working-directory: ${{ env.WORKDIR_PATH }}/workdir
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b ${{ matrix.REPO_BRANCH }} openwrt
-        ln -sf ${{ env.WORKDIR_PATH }}/workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        git clone "$REPO_URL" -b "${{ matrix.REPO_BRANCH }}" openwrt
+        ln -sf "${{ env.WORKDIR_PATH }}/workdir/openwrt" "$GITHUB_WORKSPACE/openwrt"
 
     - name: 缓存构建动作
       uses: klever1988/cachewrtbuild@main
@@ -99,10 +111,10 @@ jobs:
       env:
         FEEDS_CONF_PATH: ${{ matrix.ARCHITECTURE }}/${{ env.FEEDS_CONF }}
       run: |
-        [ -e $FEEDS_CONF_PATH ] && mv $FEEDS_CONF_PATH openwrt/$FEEDS_CONF
-        chmod +x $DIY_P1_SH
+        if [ -e "$FEEDS_CONF_PATH" ]; then mv "$FEEDS_CONF_PATH" "openwrt/$FEEDS_CONF"; fi
+        chmod +x "$DIY_P1_SH"
         cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        "$GITHUB_WORKSPACE/$DIY_P1_SH"
 
     - name: 更新 feeds
       run: |
@@ -116,13 +128,26 @@ jobs:
       env:
         CONFIG_FILE_PATH: ${{ matrix.ARCHITECTURE }}/${{ env.CONFIG_FILE }}
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE_PATH ] && mv $CONFIG_FILE_PATH openwrt/$CONFIG_FILE
-        chmod +x $DIY_P2_SH
-        chmod +x $DIY_P3_SH
+        if [ -e files ]; then mv files openwrt/files; fi
+        if [ -e "$CONFIG_FILE_PATH" ]; then mv "$CONFIG_FILE_PATH" "openwrt/$CONFIG_FILE"; fi
+        chmod +x "$DIY_P2_SH"
+        chmod +x "$DIY_P3_SH"
         cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
-        $GITHUB_WORKSPACE/$DIY_P3_SH
+        "$GITHUB_WORKSPACE/$DIY_P2_SH"
+        "$GITHUB_WORKSPACE/$DIY_P3_SH"
+
+    - name: SSH 连接超时（20 分钟无人连接则按默认配置编译）
+      # 环境已就绪：feeds 已更新、.config 已就位。
+      # 此步骤打印 SSH 链接（展开步骤日志查看），供用户连上去改配置；
+      # 连接后修改完退出（exit / Ctrl+D）立即继续编译；
+      # 20 分钟内无人连接则自动按默认配置继续。
+      uses: lhotari/action-upterm@v1
+      with:
+        limit-access-to-actor: true
+        limits: |
+          cpus=2
+          memory=4GB
+          time=20m
 
     - name: 下载软件包
       id: package
@@ -153,7 +178,7 @@ jobs:
       run: df -hT
 
     - name: 上传 bin 文件夹
-      uses: actions/upload-artifact@main
+      uses: actions/upload-artifact@v4
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.FILE_DATE }}
@@ -161,7 +186,8 @@ jobs:
 
     - name: 整理固件文件
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      # 加上编译成功条件：编译失败时 bin/targets 不存在，避免 cd 通配符不匹配产生额外报错
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
@@ -169,7 +195,7 @@ jobs:
         echo "status=success" >> ${GITHUB_OUTPUT}
 
     - name: 上传固件目录
-      uses: actions/upload-artifact@main
+      uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.FILE_DATE }}
@@ -201,14 +227,16 @@ jobs:
           ${{ env.FIRMWARE }}/*squashfs-sysupgrade.img.gz
 
     - name: 删除运行记录
-      uses: Mattraks/delete-workflow-runs@main
+      uses: Mattraks/delete-workflow-runs@v2.1.0
+      # GH_TOKEN 未配置时跳过，避免空 token 报错
+      if: env.GH_TOKEN_PRESENT == 'true'
       with:
         retain_days: 1
         keep_minimum_runs: 1
-        token: ${{ env.GITHUB_TOKEN }}
+        token: ${{ secrets.GH_TOKEN }}
 
     - name: 删除自动发布的旧固件
-      uses: dev-drprasad/delete-older-releases@master
+      uses: dev-drprasad/delete-older-releases@v0.3.4
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 15
